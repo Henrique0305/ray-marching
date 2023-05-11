@@ -1,137 +1,241 @@
-uniform float time;
-uniform float progress;
-uniform vec2 mouse;
-uniform sampler2D matcap, matcap1;
-uniform vec4 resolution;
-varying vec2 vUv;
-float PI = 3.141592653589793238;
+#version 300 es
+precision highp float;
 
-vec2 getmatcap(vec3 eye, vec3 normal) {
-  vec3 reflected = reflect(eye, normal);
-  float m = 2.8284271247461903 * sqrt( reflected.z+1.0 );
-  return reflected.xy / m + 0.5;
+
+uniform vec2 iResolution;
+
+uniform vec2 iMouse;
+uniform float iTime;
+uniform float iZoom;
+uniform float iSpeed;
+uniform vec3 iColor;
+uniform float iGyroidScale;
+
+
+// we need to declare an output for the fragment shader
+out vec4 outColor;
+
+// "ShaderToy Tutorial - Ray Marching for Dummies!" 
+// by Martijn Steinrucken aka BigWings/CountFrolic - 2018
+// License Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported License.
+//
+// This shader is part of a tutorial on YouTube
+// https://youtu.be/PGtv-dBi2wE
+
+#define MAX_STEPS 100
+#define MAX_DIST 100.
+#define SURF_DIST .001
+#define TAU 6.283185
+#define PI 3.141592
+#define S smoothstep
+#define T iTime*iSpeed
+#define AA 2
+
+
+mat2 Rot(float a) {
+    float s = sin(a);
+    float c = cos(a);
+    return mat2(c, -s, s, c);
 }
 
-mat4 rotationMatrix(vec3 axis, float angle) {
-    axis = normalize(axis);
-    float s = sin(angle);
-    float c = cos(angle);
-    float oc = 1.0 - c;
-    
-    return mat4(oc * axis.x * axis.x + c,           oc * axis.x * axis.y - axis.z * s,  oc * axis.z * axis.x + axis.y * s,  0.0,
-                oc * axis.x * axis.y + axis.z * s,  oc * axis.y * axis.y + c,           oc * axis.y * axis.z - axis.x * s,  0.0,
-                oc * axis.z * axis.x - axis.y * s,  oc * axis.y * axis.z + axis.x * s,  oc * axis.z * axis.z + c,           0.0,
-                0.0,                                0.0,                                0.0,                                1.0);
-}
-
-vec3 rotate(vec3 v, vec3 axis, float angle) {
-	mat4 m = rotationMatrix(axis, angle);
-	return (m * vec4(v, 1.0)).xyz;
-}
-
-float sdSphere( vec3 p, float r )
-{
-  return length(p)-r;
-}
-
-float sdBox( vec3 p, vec3 b ){
-  vec3 q = abs(p) - b;
-  return length(max(q,0.)) + min(max(q.x,max(q.y,q.z)),0.);
-}
-
-float smin( float a, float b, float k )
-{
-    float h = clamp( 0.5+0.5*(b-a)/k, 0.0, 1.0 );
+float smin( float a, float b, float k ) {
+    float h = clamp( 0.5+0.5*(b-a)/k, 0., 1. );
     return mix( b, a, h ) - k*h*(1.0-h);
 }
 
-vec2 sdf(vec3 p){
-  float type = 0.;
-
-  vec3 p1 = rotate(p, vec3(1.), time/5.);
-  float s = 0.3 + 0.1*sin(time/3.) + 0.2*sin(time/6.) + 0.05*sin(time);
-  float box = smin(sdBox(p1, vec3(s)),sdSphere(p, s), s);
-
-
-  float realSphere = sdSphere(p1, 0.3);
-  float final = mix(box, realSphere, 0.5 + 0.5*sin(time/3.));
-
-
-  for(float i = 0.; i < 10.; i++){
-    float randOffset = fract(sin(i)*1000.);
-    float progr = 1. -fract(time/3. + randOffset*3.);
-    vec3 pos = vec3(sin(randOffset*2.*PI), cos(randOffset*2.*PI), 0.);
-    float gotoCenter = sdSphere(p - pos* progr, 0.1*sin(PI*progr));
-    final = smin(final, gotoCenter, 0.3);
-  }
-
-  float mouseSphere = sdSphere(p - vec3(mouse*resolution.zw*2., 0.), 0.2 + 0.1 * sin(time));
-
-  if(mouseSphere < final){
-    type = 1.;
-  }
-  return vec2(smin(final, mouseSphere, 0.4), type);
+float Hash21(vec2 p) {
+    p = fract(p*vec2(123.34,234.34));
+    p += dot(p, p+23.43);
+    return fract(p.x*p.y);
 }
 
-vec3 calcNormal( in vec3 p ) 
-{
-    const float eps = 0.0001;
-    const vec2 h = vec2(eps,0);
-    return normalize( vec3(sdf(p+h.xyy).x - sdf(p-h.xyy).x,
-                           sdf(p+h.yxy).x - sdf(p-h.yxy).x,
-                           sdf(p+h.yyx).x - sdf(p-h.yyx).x));
+float Gyroid(vec3 p) {
+    float scale = 10.;
+    vec3 p2 = p*iGyroidScale;
+    p2.xy *= Rot(T);
+    return (abs(dot(sin(p2), cos(p2.zxy)))-.4)/iGyroidScale;
 }
 
+float sabs(float x, float k) {
+    return sqrt(x*x+k);
+}
 
-
-void main(){
-  float dist = length(vUv - vec2(0.5));
-  vec3 bg = mix(vec3(0.3), vec3(0.), dist);
-
-  vec2 newUV = (vUv - vec2(0.5))*resolution.zw + vec2(0.5);
-  vec3 camPos = vec3(0., 0. ,2.);
-  vec3 ray = normalize(vec3((vUv - vec2(0.5))*resolution.zw, -1));
-
-  vec3 rayPos = camPos;
-  float t = 0.;
-  float tMax = 5.;
-  float type = -1.;
-
-
-  for(int i = 0; i < 256; i++){
-    vec3 pos = camPos + ray * t;
-    float h = sdf(pos).x;
-    type = sdf(pos).y;
-
-    if(h < 0.001 || t>tMax) break;
-
-    t += h;
-  }
-
-  vec3 color = bg;
-  if(t < tMax){
-    vec3 pos = camPos + ray * t;
-    color = vec3(1.0);
-    vec3 normal = calcNormal(pos);
-    color = normal;
-    float diff = dot(vec3(1.), normal);
-    vec2 matcapUV = getmatcap(ray, normal);
-    color = vec3(diff);
+float GetDist(vec3 p) {
     
-    if(type < 0.5){
-      color = texture2D(matcap1, matcapUV).rgb;
-    } else{
-      color = texture2D(matcap, matcapUV).rgb;
+    float sphere = abs(length(p)-1.)-.03;
 
+    float d=smin(sphere, Gyroid(p)*.7, -.03);
+    float ground = p.y+1.+S(.01, -.01, d)*.1;
+   
+    float x = p.x;
+    p.x += T*1.3;
+   
+    vec3 p2 = p*5.;
+    
+    float wake = S(.4, .0, abs(p.z));
+    wake *= S(0., -1., x);
+	float gyroid = (sabs(dot(sin(p2), cos(p2.zxy)),wake)-.4)/10.;
+    
+    ground += gyroid;
+    d = min(d, ground*.5);
+    
+    return d;
+}
+
+vec2 RayMarch(vec3 ro, vec3 rd) {
+	float dO=0.;
+    float dM=MAX_DIST;
+    
+    for(int i=0; i<MAX_STEPS; i++) {
+    	vec3 p = ro + rd*dO;
+        float dS = GetDist(p);
+        if(dS<dM) dM = dS;
+        dO += dS;
+        if(dO>MAX_DIST || abs(dS)<SURF_DIST) break;
     }
+    
+    return vec2(dO, dM);
+}
 
+vec3 GetNormal(vec3 p) {
+	float d = GetDist(p);
+    vec2 e = vec2(.001, 0);
+    
+    vec3 n = d - vec3(
+        GetDist(p-e.xyy),
+        GetDist(p-e.yxy),
+        GetDist(p-e.yyx));
+    
+    return normalize(n);
+}
 
-    float fresne1 = pow(1. + dot(ray, normal), 3.);
-    // color = vec3(fresne1);
+vec3 R(vec2 uv, vec3 p, vec3 l, float z) {
+    vec3 f = normalize(l-p),
+        r = normalize(cross(vec3(0,1,0), f)),
+        u = cross(f,r),
+        c = p+f*z,
+        i = c + uv.x*r + uv.y*u,
+        d = normalize(i-p);
+    return d;
+}
 
-    color = mix(color, bg, fresne1);
-  }
+float GlitterLayer(vec2 p, float seed) {
+    float t = iTime*3.+seed;
+    vec2 id = floor(p);
+    vec2 gv = fract(p)-.5;
+    
+    float n = Hash21(id);
+    float x = fract(n*12.32);
+    float y = fract(n*123.32);
+    vec2 offs = vec2(x,y)-.5;
+    
+    float d = length(gv-offs*.8);
+    float m = S(.2, .0, d);
+    
+    m *= pow(sin(t+n*6.2832)*.5+.5, 3.);
+    return m;
+}
 
-  gl_FragColor = vec4(color, 1.);
-  // gl_FragColor = vec4(fresne1, 1.);
+vec3 RayPlane(vec3 ro, vec3 rd, vec3 p, vec3 n) {
+    float t = max(0., dot(p-ro,n)/dot(rd, n));
+    return ro + rd*t;
+}
+
+void mainImage( out vec4 fragColor, in vec2 fragCoord )
+{
+    vec2 m = iMouse.xy/iResolution.xy;
+    float t = iTime*.1;
+    vec3 col = vec3(iColor);
+    
+    vec3 ro = vec3(0, iZoom, -1)*2.;
+    ro.yz *= Rot(-m.y*3.14+1.);
+    ro.xz *= Rot(-m.x*6.2831+iTime*.05);
+    ro.y = max(ro.y, -.9);
+    
+    for(int x=0; x<AA; x++) {
+        for(int y=0; y<AA; y++) {
+            vec2 offs = vec2(x, y)/float(AA) -.5;
+
+            vec2 uv = (fragCoord+offs-.5*iResolution.xy)/iResolution.y;
+            vec3 rd = R(uv, ro, vec3(0,0,0), 1.);
+
+            float dist = RayMarch(ro, rd).x;
+            
+            vec3 lightPos = vec3(0);
+            vec3 shadowPos = lightPos+normalize(ro-lightPos);
+            vec3 p = ro + rd * dist;
+            if(dist<MAX_DIST) {
+                
+                vec3 l = normalize(lightPos-p);
+                vec3 n = GetNormal(p);
+
+                float dif = clamp(dot(n, l)*.5+.5, 0., 1.);
+
+                vec2 d = RayMarch(lightPos, l);
+
+                float shadow = length(p)<1.03 ? 1. : S(SURF_DIST, SURF_DIST*20., d.y)*.6+.4;
+                float falloff = min(1., 1./length(p.xz));               
+
+                dif *= shadow*falloff*falloff;
+                
+                col += dif;
+
+                
+                // ground glitter
+                if(p.y<-.9) {
+                    vec2 st = p.xz;
+                    float offs = dot(rd, vec3(10));
+
+                    st.x += t*1.3;
+                    float glitter = GlitterLayer(st*10., offs);
+                    glitter += GlitterLayer(st*17.+3.1, offs);
+                    glitter += GlitterLayer(st*23.+23.1, offs);
+                    col += pow(glitter,5.)*falloff*shadow*shadow;
+                }
+            }
+            // center light
+            float centerDist = length(uv);
+            float g = Gyroid(shadowPos);
+            float light = S(0., .03, g);
+            col += min(10., light*.02/max(centerDist,1e-3))*vec3(1.,.8,.9);
+            
+            // volumetric starburst
+            float sb = max(0., Gyroid(normalize(RayPlane(ro, rd, vec3(0), normalize(ro)))));
+            sb *= 3.*S(-.2,.1, centerDist-.4);
+            col += sb;
+            
+            // SSS 
+            float sss = max(0., 0. -dot(uv, uv)*25.);
+            sss *= sss;
+            sss *= S(2.5,2., dist); // only on the front
+            sss *= 1.-light*.5;
+            vec3 P = p;
+            
+            float vein = S(-.01,.02, Gyroid(P+sin(P*30.+iTime)*.01)+.03);
+            sss *= vein;
+            col += sss*vec3(1,.1,.1);
+            col += vec3(1,0,0)*(1.-vein)*sss;
+        }
+    }
+    
+    col /= float(AA*AA);
+    
+    float pulse = pow(sin(iTime)*.5+.5, 150.);
+    t = iTime;
+    // float k = sin(t)+sin(t*5.)*.5+sin(t*17.)*.25+sin(t*37.)*.1;
+    // col *= 1.+k*.2;
+    
+    vec2 uv = (fragCoord-.5*iResolution.xy)/iResolution.y;
+    col *= 1.-dot(uv,uv);
+
+    // make the col less bright
+    col = pow(col, vec3(iZoom * .5 + .5));
+
+    
+    col /= col+3.; col *= 3.; // tone mapping 
+    
+    fragColor = vec4(col,1.0);
+}
+void main() {
+  mainImage(outColor, gl_FragCoord.xy);
 }

@@ -1,31 +1,55 @@
+<!-- Licensed under a BSD license. See license.html for license -->
 <!DOCTYPE html>
 <html>
 
-<head lang="en">
-  <meta charset="UTF-8" />
-  <meta name="viewport"
-    content="width=device-width, shrink-to-fit=0, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0" />
-  <title>Projeto RayMarching</title>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+  <title>WebGL2 - Shadertoy</title>
   <style>
     * {
       margin: 0;
       padding: 0;
     }
 
-    #container {
+    body {
+      height: calc(100vh - 20px);
       width: 100vw;
-      height: 100vh;
+    }
+
+    .divcanvas {
+      position: relative;
+      display: inline-block;
+      width: 100%;
+      height: 100%;
     }
 
     canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+
+    .iframe .divcanvas {
       display: block;
     }
   </style>
 </head>
 
 <body>
-  <div id="container"></div>
-  <script type="module" src="./app.js"></script>
+  <div class="divcanvas">
+    <canvas id="canvas"></canvas>
+  </div>
 </body>
+<!--
+for most samples webgl-utils only provides shader compiling/linking and
+canvas resizing because why clutter the examples with code that's the same in every sample.
+See https://webglfundamentals.org/webgl/lessons/webgl-boilerplate.html
+and https://webglfundamentals.org/webgl/lessons/webgl-resizing-the-canvas.html
+for webgl-utils, m3, m4, and webgl-lessons-ui.
+-->
+<script src="https://webgl2fundamentals.org/webgl/resources/webgl-utils.js"></script>
+<script type="module" src="app.js"></script>
 
 </html>
