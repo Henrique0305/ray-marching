@@ -4,6 +4,44 @@ import vs from "./vertex.glsl";
 import * as dat from "dat.gui";
 
 function main() {
+  let audio1 = new Audio();
+  audio1.src = "tune.mp3";
+
+  const container = document.getElementById("container");
+  const canvas2 = document.getElementById("canvas2");
+  canvas2.width = window.innerWidth;
+  canvas2.height = window.innerHeight;
+
+  canvas2.addEventListener("click", () => {
+    if (audio1.paused) {
+      audio1.play();
+    } else {
+      audio1.pause();
+    }
+  });
+
+  const ctx = canvas2.getContext("2d");
+
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  let audioSource = null;
+  let analyser = null;
+
+  if (audio1) {
+    audio1.loop = true;
+    audio1.play();
+  }
+  audioSource = audioCtx.createMediaElementSource(audio1);
+  analyser = audioCtx.createAnalyser();
+  audioSource.connect(analyser);
+  analyser.connect(audioCtx.destination);
+
+  analyser.fftSize = 128;
+  const bufferLength = analyser.frequencyBinCount;
+  const dataArray = new Uint8Array(bufferLength);
+  const barWidth = canvas2.width / bufferLength;
+
+  let x = 0;
+
   // Get A WebGL context
   /** @type {HTMLCanvasElement} */
   const canvas = document.querySelector("#canvas");
@@ -25,6 +63,9 @@ function main() {
   const speed = gl.getUniformLocation(program, "iSpeed");
   const colorLocation = gl.getUniformLocation(program, "iColor");
   const gyroidScale = gl.getUniformLocation(program, "iGyroidScale");
+  const brightness = gl.getUniformLocation(program, "iBrightness");
+
+  let brightnessValue = 0.5;
 
   const gui = new dat.GUI();
 
@@ -45,7 +86,7 @@ function main() {
   // GYROID SCALE CONTROLLER
   const gyroidController = gui.addFolder("Gyroid Scale");
   let gyroidValue = { gyroid: 10.1 };
-  gyroidController.add(gyroidValue, "gyroid", 0.0, 20.0).onChange((value) => {
+  gyroidController.add(gyroidValue, "gyroid", 1.0, 20.0).onChange((value) => {
     gyroidValue = value;
   });
   // set default value`to 10
@@ -128,11 +169,11 @@ function main() {
 
   inputElem.addEventListener("wheel", (e) => {
     e.preventDefault();
-    if (zoomValue + e.deltaY * -0.01 < 1) {
+    if (zoomValue + e.deltaY * -0.007 < 1) {
       return;
     }
 
-    zoomValue += e.deltaY * -0.01;
+    zoomValue += e.deltaY * -0.007;
   });
 
   inputElem.addEventListener(
@@ -163,6 +204,19 @@ function main() {
   let then = 0;
   let time = 0;
   function render(now) {
+    x = 0;
+    ctx.clearRect(0, 0, canvas2.width, canvas2.height);
+    let brightnessValue2 = 0.5;
+    analyser.getByteFrequencyData(dataArray);
+    for (let i = 0; i < bufferLength; i++) {
+      let barHeight = dataArray[i];
+      brightnessValue2 = -(brightnessValue2 + (barHeight * 2) / 30);
+
+      ctx.fillStyle = "white";
+      ctx.fillRect(x, canvas2.height - barHeight, barWidth, barHeight);
+      x += barWidth;
+    }
+
     requestId = undefined;
     now *= 0.001; // convert to seconds
     const elapsedTime = Math.min(now - then, 0.1);
@@ -187,8 +241,8 @@ function main() {
     gl.uniform1f(zoom, zoomValue);
     gl.uniform1f(speed, speedValue);
     gl.uniform3f(colorLocation, colorValue.r, colorValue.g, colorValue.b);
-    console.log(gyroidValue);
     gl.uniform1f(gyroidScale, gyroidValue);
+    gl.uniform1f(brightness, brightnessValue2);
 
     gl.drawArrays(
       gl.TRIANGLES,

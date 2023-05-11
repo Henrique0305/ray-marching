@@ -10,6 +10,7 @@ uniform float iZoom;
 uniform float iSpeed;
 uniform vec3 iColor;
 uniform float iGyroidScale;
+uniform float iBrightness;
 
 
 // we need to declare an output for the fragment shader
@@ -22,15 +23,14 @@ out vec4 outColor;
 // This shader is part of a tutorial on YouTube
 // https://youtu.be/PGtv-dBi2wE
 
-#define MAX_STEPS 100
-#define MAX_DIST 100.
-#define SURF_DIST .001
-#define TAU 6.283185
-#define PI 3.141592
 #define S smoothstep
-#define T iTime*iSpeed
 #define AA 2
+#define T iTime*iSpeed
+#define TAU 6.283185
 
+#define MAX_STEPS 300
+#define MAX_DIST 30.
+#define SURF_DIST .001
 
 mat2 Rot(float a) {
     float s = sin(a);
@@ -50,10 +50,9 @@ float Hash21(vec2 p) {
 }
 
 float Gyroid(vec3 p) {
-    float scale = 10.;
-    vec3 p2 = p*iGyroidScale;
+    vec3 p2 = p*iGyroidScale + iBrightness/50.;
     p2.xy *= Rot(T);
-    return (abs(dot(sin(p2), cos(p2.zxy)))-.4)/iGyroidScale;
+    return (abs(dot(sin(p2), cos(p2.zxy)))-.4)/(iGyroidScale +  iBrightness/50.);
 }
 
 float sabs(float x, float k) {
@@ -62,10 +61,11 @@ float sabs(float x, float k) {
 
 float GetDist(vec3 p) {
     
-    float sphere = abs(length(p)-1.)-.03;
+    float sphere = abs(length(p)-1. +  iBrightness/50.)-.03;
 
     float d=smin(sphere, Gyroid(p)*.7, -.03);
-    float ground = p.y+1.+S(.01, -.01, d)*.1;
+    
+    float ground = p.y+1.+S(.1, -.01, d)*.1;
    
     float x = p.x;
     p.x += T*1.3;
@@ -75,7 +75,7 @@ float GetDist(vec3 p) {
     float wake = S(.4, .0, abs(p.z));
     wake *= S(0., -1., x);
 	float gyroid = (sabs(dot(sin(p2), cos(p2.zxy)),wake)-.4)/10.;
-    
+
     ground += gyroid;
     d = min(d, ground*.5);
     
@@ -122,7 +122,7 @@ vec3 R(vec2 uv, vec3 p, vec3 l, float z) {
 float GlitterLayer(vec2 p, float seed) {
     float t = iTime*3.+seed;
     vec2 id = floor(p);
-    vec2 gv = fract(p)-.5;
+    vec2 gv = fract(p)-.1;
     
     float n = Hash21(id);
     float x = fract(n*12.32);
@@ -160,7 +160,7 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
             vec3 rd = R(uv, ro, vec3(0,0,0), 1.);
 
             float dist = RayMarch(ro, rd).x;
-            
+
             vec3 lightPos = vec3(0);
             vec3 shadowPos = lightPos+normalize(ro-lightPos);
             vec3 p = ro + rd * dist;
@@ -180,7 +180,6 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
                 
                 col += dif;
 
-                
                 // ground glitter
                 if(p.y<-.9) {
                     vec2 st = p.xz;
@@ -204,8 +203,8 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
             sb *= 3.*S(-.2,.1, centerDist-.4);
             col += sb;
             
-            // SSS 
-            float sss = max(0., 0. -dot(uv, uv)*25.);
+            // SSS
+            float sss = max(0., 1.-dot(uv, uv)*25.);
             sss *= sss;
             sss *= S(2.5,2., dist); // only on the front
             sss *= 1.-light*.5;
@@ -215,6 +214,8 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
             sss *= vein;
             col += sss*vec3(1,.1,.1);
             col += vec3(1,0,0)*(1.-vein)*sss;
+            // make the light lesse brigher as zoom changes
+            col *= (1.+iBrightness*.05)  - iZoom*.1;
         }
     }
     
@@ -228,9 +229,8 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
     vec2 uv = (fragCoord-.5*iResolution.xy)/iResolution.y;
     col *= 1.-dot(uv,uv);
 
-    // make the col less bright
     col = pow(col, vec3(iZoom * .5 + .5));
-
+    
     
     col /= col+3.; col *= 3.; // tone mapping 
     
